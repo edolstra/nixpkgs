@@ -11,6 +11,15 @@ let
     cfg.interfaces ++
     optional (config.networking.WLANInterface != "") config.networking.WLANInterface;
 
+  configFile_ = pkgs.writeText "wpa_supplicant.conf" (concatStrings (mapAttrsToList (name: value: ''
+    network={
+      ssid="${name}"
+      ${optionalString (value.key != null) ''
+        psk="${builtins.encryptString <nixos-store-key> value.key}"
+      ''}
+    }
+  '') cfg.networks));
+
 in
 
 {
@@ -56,6 +65,41 @@ in
         description = "Force a specific wpa_supplicant driver.";
       };
 
+      networks = mkOption {
+        type = types.attrsOf types.optionSet;
+        default = {};
+        description = ''
+          Definitions of known wireless networks.
+        '';
+        options =
+          { config, ... }:
+          { options = {
+
+              keyManagement = mkOption {
+                type = types.string;
+                default = "WPA-PSK";
+                description = ''
+                  The key management protocol.
+                '';
+              };
+
+              key = mkOption {
+                type = types.nullOr types.string;
+                default = null;
+                example = "Hello world!";
+                description = ''
+                  The pre-shared key.
+                '';
+              };
+
+            };
+
+            config = {
+              keyManagement = mkDefault (if config.key == null then "NONE" else "WPA-PSK");
+            };
+          };
+      };
+
       userControlled = {
         enable = mkOption {
           type = types.bool;
@@ -98,12 +142,15 @@ in
 
         path = [ pkgs.wpa_supplicant ];
 
-        preStart = ''
-          touch -a ${configFile}
-          chmod 600 ${configFile}
-        '' + optionalString cfg.userControlled.enable ''
+        preStart = if cfg.userControlled.enable then ''
+          mkdir -m 0700 -p /run/secret
+          ${config.nix.package}/bin/nix-store --decrypt ${toString <nixos-store-key>} \
+            ${configFile_} > /run/secret/wpa_supplicant.conf
+        '' else ''
           if [ ! -s ${configFile} ]; then
-            echo "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=${cfg.userControlled.group}" >> ${configFile}
+            touch -a ${configFile}
+            chmod 600 ${configFile}
+            echo "ctrl_interface=DIR=/run/wpa_supplicant GROUP=${cfg.userControlled.group}" >> ${configFile}
             echo "update_config=1" >> ${configFile}
           fi
         '';
@@ -121,7 +168,7 @@ in
             '' else ''
               ifaces="${concatStringsSep " -N " (map (i: "-i${i}") ifaces)}"
             ''}
-            exec wpa_supplicant -s -u -D${cfg.driver} -c ${configFile} $ifaces
+            exec wpa_supplicant -s -u -D${cfg.driver} -c ${if cfg.userControlled.enable then configFile else /run/secret/wpa_supplicant.conf} $ifaces
           '';
       };
 
