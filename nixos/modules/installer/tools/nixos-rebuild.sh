@@ -104,7 +104,7 @@ fi
 # amd64 system the user has an i686 Nix package in her PATH, then we
 # would silently downgrade the whole system to be i686 NixOS on the
 # next reboot.
-if [ -z "$_NIXOS_REBUILD_REEXEC" ]; then
+if [ -z "$_NIXOS_REBUILD_REEXEC" -a -n "$buildNix" ]; then
     export PATH=@nix@/bin:$PATH
 fi
 
@@ -182,6 +182,16 @@ fi
 
 if [ "$action" = dry-run ]; then
     extraBuildFlags+=(--dry-run)
+fi
+
+
+# Generate a key for encrypting data in the Nix store.
+if [ -w /var/lib/nixos -a ! -e /var/lib/nixos/store-key ]; then
+    touch /var/lib/nixos/store-key.tmp
+    chmod 0400 /var/lib/nixos/store-key.tmp
+    nix-store --generate-key > /var/lib/nixos/store-key.tmp
+    mv /var/lib/nixos/store-key.tmp /var/lib/nixos/store-key
+    extraBuildFlags+=(-I nixos-store-key=/var/lib/nixos/store-key)
 fi
 
 
