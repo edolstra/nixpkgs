@@ -14666,11 +14666,12 @@ with pkgs;
 
   bleachbit = callPackage ../applications/misc/bleachbit { };
 
-  blender = callPackage  ../applications/misc/blender {
-    cudaSupport = config.cudaSupport or false;
-    python = python35;
-    stdenv = overrideCC stdenv gcc6;
-  };
+  blender =
+    let
+      jackaudioSupport = false;
+      cudaSupport = config.cudaSupport or false;
+      colladaSupport = true;
+    in include ../applications/misc/blender;
 
   bluefish = callPackage ../applications/editors/bluefish {
     gtk = gtk3;
@@ -15843,7 +15844,7 @@ with pkgs;
     inherit (gnome2) gnome_python;
   };
 
-  hello = callPackage ../applications/misc/hello { };
+  hello = include ../applications/misc/hello;
 
   helmholtz = callPackage ../applications/audio/pd-plugins/helmholtz { };
 

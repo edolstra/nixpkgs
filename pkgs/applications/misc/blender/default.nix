@@ -1,16 +1,8 @@
-{ stdenv, lib, fetchurl, boost, cmake, ffmpeg, gettext, glew
-, ilmbase, libXi, libX11, libXext, libXrender
-, libjpeg, libpng, libsamplerate, libsndfile
-, libtiff, mesa, openal, opencolorio, openexr, openimageio, openjpeg_1, python
-, zlib, fftw, opensubdiv, freetype, jemalloc, ocl-icd
-, jackaudioSupport ? false, libjack2
-, cudaSupport ? false, cudatoolkit
-, colladaSupport ? true, opencollada
-}:
-
 with lib;
 
-stdenv.mkDerivation rec {
+let python = python35; in
+
+(overrideCC stdenv gcc6).mkDerivation rec {
   name = "blender-2.79a";
 
   src = fetchurl {
@@ -18,7 +10,7 @@ stdenv.mkDerivation rec {
     sha256 = "1mw45mvfk9f0fhn12vp3g2vwqzinrp3by0m3w01wj87h9ri5zkwc";
   };
 
-  buildInputs =
+  buildInputs = with xlibs;
     [ boost cmake ffmpeg gettext glew ilmbase
       libXi libX11 libXext libXrender
       freetype libjpeg libpng libsamplerate libsndfile libtiff mesa openal
