@@ -34,6 +34,8 @@
 
 assert crossSystem == localSystem;
 
+assert localSystem.system == "i686-linux";
+
 let
   inherit (localSystem) system platform;
 
@@ -44,13 +46,6 @@ let
       ${if system == "x86_64-linux" then "NIX_LIB64_IN_SELF_RPATH=1" else ""}
       ${if system == "mipsel-linux" then "NIX_LIB32_IN_SELF_RPATH=1" else ""}
     '';
-
-
-  # The bootstrap process proceeds in several steps.
-
-
-  # Create a standard environment by downloading pre-built binaries of
-  # coreutils, GCC, etc.
 
 
   # Download and unpack the bootstrap tools (coreutils, GCC, Glibc, ...).
@@ -119,7 +114,8 @@ let
 
 in
 
-[
+# The bootstrap process proceeds in several steps.
+lib.sublist 0 2 [
 
   ({}: {
     __raw = true;
@@ -141,6 +137,7 @@ in
       # to refer to this stage directly, which violates the principle that each
       # stage should only access the stage that came before it.
       ccWrapperStdenv = self.stdenv;
+      /*
       # The Glibc include directory cannot have the same prefix as the
       # GCC include directory, since GCC gets confused otherwise (it
       # will search the Glibc headers before the GCC headers).  So
@@ -167,8 +164,108 @@ in
         inherit (self) stdenvNoCC coreutils gnugrep;
         bintools = bootstrapTools;
       };
+      */
       coreutils = bootstrapTools;
       gnugrep = bootstrapTools;
+
+      mesBootBinaries = self.stdenvNoCC.mkDerivation {
+        name = "mes-boot-binaries";
+        buildCommand = ''
+          mkdir $out
+          cd $out
+
+          tar xf ${import <nix/fetchurl.nix> {
+            url = http://alpha.gnu.org/gnu/guix/bootstrap/i686-linux/20181020/mes-minimal-stripped-0.18-0.08f04f5-i686-linux.tar.xz;
+            sha256 = "0qwpby91hp6afmg5ibdrrk3fw85zxdazfk7rhrdsihsfzqwmfhfx";
+          }}
+          chmod -R u+w .
+
+          tar xf ${import <nix/fetchurl.nix> {
+            url = http://alpha.gnu.org/gnu/guix/bootstrap/i686-linux/20181020/mescc-tools-static-0.5.2-0.bb062b0-i686-linux.tar.xz;
+            sha256 = "11lniw0vg61kmyhvnwkmcnkci9ym6hbmiksiqggd0hkipbq7hvlz";
+          }}
+          chmod -R u+w .
+
+          tar xf ${import <nix/fetchurl.nix> {
+            url = http://alpha.gnu.org/gnu/guix/bootstrap/i686-linux/20131110/guile-2.0.9.tar.xz;
+            sha256 = "0im800m30abgh7msh331pcbjvb4n02smz5cfzf1srv0kpx3csmxp";
+          }}
+          chmod -R u+w .
+
+          bin/hex2 --help
+          bin/guile --help
+        '';
+      };
+
+      mes = self.stdenvNoCC.mkDerivation {
+        name = "mes";
+
+        src = self.fetchurlBoot {
+          url = "https://git.savannah.gnu.org/cgit/mes.git/snapshot/mes-08f04f559670d9e8f57eb03bb9b13f4d0b81cedf.tar.gz";
+          sha256 = "1b7wz9k38pfrz707pd4p8s54q903jr167q73ya7qkna89sxj3wna";
+        };
+
+        buildInputs = [ self.mesBootBinaries ];
+
+        GUILE_TOOLS = "true";
+        MES_SEED = "${self.mesBootBinaries}/lib";
+
+        configurePhase = "./configure.sh --prefix=$out";
+
+        buildPhase = "sh ./build.sh";
+
+        installPhase = ''
+          cp src/mes.S.blood-elf src/mes.S # FIXME
+          sh ./install.sh
+        '';
+
+        fixupPhase = "true";
+      };
+
+      tinycc = self.stdenv.mkDerivation {
+        name = "tinycc";
+
+        MES = "guile";
+        MES_PREFIX = "mes";
+        ONE_SOURCE = 1;
+
+        buildInputs = [ self.mes self.mesBootBinaries ];
+
+        srcs = [
+          (let commit = "c7b3f59d1a71e71b470f859b20f0cfe840f3954d"; in import <nix/fetchurl.nix> {
+            url = "https://gitlab.com/janneke/tinycc/-/archive/${commit}/tinycc-${commit}.tar.gz";
+            sha256 = "1agz5w5q6dm51n63hsxii33hxdghmdiacbb5zzxzac3aarfxjb2m";
+          })
+          (import <nix/fetchurl.nix> {
+            url = "http://download.savannah.gnu.org/releases/nyacc/nyacc-0.86.0.tar.gz";
+            sha256 = "0lkd9lyspvhxlfs0496gsllwinh62jk9wij6gpadvx9gwz6yavd9";
+          })
+        ];
+
+        postUnpack = ''
+          mv nyacc-* nyacc-source
+          pushd nyacc-source
+          patch -p1 ${import <nix/fetchurl.nix> {
+            url = "http://git.savannah.gnu.org/cgit/guix.git/plain/gnu/packages/patches/nyacc-binary-literals.patch?h=core-updates";
+            sha256 = "18pgjqvlbrdyp8bbpgn6x5kl54lnhzncnvy73r53p54r6dz6xs0c";
+          }}
+          popd
+        '';
+
+        setSourceRoot = "sourceRoot=$(ls -d tinycc-*)";
+
+        configurePhase = ''
+          ln -s ${self.mesBootBinaries}/lib ../mes-seed
+          ln -s ${self.mes}/share/mes mes
+          export GUILE_LOAD_PATH=${self.mesBootBinaries}/share/guile/2.0:$TMPDIR/nyacc-source/module
+          ./configure --prefix=$out --crtprefix=. --tccdir=.
+          export PREFIX=$out
+        '';
+
+        buildPhase = "./build.sh";
+        installPhase = "./install.sh";
+        fixupPhase = "true";
+      };
     };
   })
 

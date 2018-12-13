@@ -64,3 +64,5 @@ echo "#! $out/bin/sh" > $out/bin/xz
 echo "exec $builder unxz \"\$@\"" >> $out/bin/xz
 
 chmod +x $out/bin/egrep $out/bin/fgrep $out/bin/xz
+
+rm -rf $out/bin/{gcc,g++,ld} $out/include-glibc $out/libexec
