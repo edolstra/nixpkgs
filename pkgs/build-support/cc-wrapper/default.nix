@@ -159,6 +159,10 @@ stdenv.mkDerivation {
         ln -s ${targetPrefix}clang $out/bin/${targetPrefix}cc
         export named_cc=${targetPrefix}clang
         export named_cxx=${targetPrefix}clang++
+      elif [ -e $ccPath/tcc ]; then
+        wrap ${targetPrefix}tcc ${./cc-wrapper.sh} $ccPath/tcc
+        ln -s ${targetPrefix}tcc $out/bin/${targetPrefix}cc
+        export named_cc=${targetPrefix}tcc
       fi
 
       if [ -e $ccPath/${targetPrefix}g++ ]; then

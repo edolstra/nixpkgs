@@ -58,7 +58,7 @@ let
   # the bootstrap.  In all stages, we build an stdenv and the package
   # set that can be built with that stdenv.
   stageFun = prevStage:
-    { name, overrides ? (self: super: {}), extraNativeBuildInputs ? [] }:
+    { name, overrides ? (self: super: {}), extraNativeBuildInputs ? [], preHook ? "" }:
 
     let
 
@@ -74,7 +74,7 @@ let
             # dependencies on the bootstrapTools in the final stdenv.
             dontPatchShebangs=1
             ${commonPreHook}
-          '';
+          '' + preHook;
         shell = "${bootstrapTools}/bin/bash";
         initialPath = [bootstrapTools];
 
@@ -95,6 +95,7 @@ let
           bintools = prevStage.binutils;
           isGNU = true;
           libc = getLibc prevStage;
+          noLibc = getLibc prevStage == null;
           inherit (prevStage) coreutils gnugrep;
           stdenvNoCC = prevStage.ccWrapperStdenv;
         };
@@ -115,7 +116,7 @@ let
 in
 
 # The bootstrap process proceeds in several steps.
-lib.sublist 0 2 [
+lib.sublist 0 3 [
 
   ({}: {
     __raw = true;
@@ -137,34 +138,6 @@ lib.sublist 0 2 [
       # to refer to this stage directly, which violates the principle that each
       # stage should only access the stage that came before it.
       ccWrapperStdenv = self.stdenv;
-      /*
-      # The Glibc include directory cannot have the same prefix as the
-      # GCC include directory, since GCC gets confused otherwise (it
-      # will search the Glibc headers before the GCC headers).  So
-      # create a dummy Glibc here, which will be used in the stdenv of
-      # stage1.
-      ${localSystem.libc} = self.stdenv.mkDerivation {
-        name = "bootstrap-stage0-${localSystem.libc}";
-        buildCommand = ''
-          mkdir -p $out
-          ln -s ${bootstrapTools}/lib $out/lib
-        '' + lib.optionalString (localSystem.libc == "glibc") ''
-          ln -s ${bootstrapTools}/include-glibc $out/include
-        '' + lib.optionalString (localSystem.libc == "musl") ''
-          ln -s ${bootstrapTools}/include-libc $out/include
-        '';
-      };
-      gcc-unwrapped = bootstrapTools;
-      binutils = import ../../build-support/bintools-wrapper {
-        name = "bootstrap-stage0-binutils-wrapper";
-        nativeTools = false;
-        nativeLibc = false;
-        buildPackages = { };
-        libc = getLibc self;
-        inherit (self) stdenvNoCC coreutils gnugrep;
-        bintools = bootstrapTools;
-      };
-      */
       coreutils = bootstrapTools;
       gnugrep = bootstrapTools;
 
@@ -263,10 +236,35 @@ lib.sublist 0 2 [
         '';
 
         buildPhase = "./build.sh";
-        installPhase = "./install.sh";
+        installPhase = "./install.sh; ln -s tcc $out/bin/ld";
         fixupPhase = "true";
       };
+
+      gcc-unwrapped = self.tinycc;
+
+      binutils = import ../../build-support/bintools-wrapper {
+        name = "bootstrap-stage0-tcc-binutils-wrapper";
+        nativeTools = false;
+        nativeLibc = false;
+        buildPackages = { };
+        noLibc = true;
+        libc = null;
+        inherit (self) stdenvNoCC coreutils gnugrep;
+        bintools = self.tinycc;
+      };
+
+      ${localSystem.libc} = null;
     };
+  })
+
+
+  (prevStage: stageFun prevStage {
+    name = "bootstrap-stage1-tcc";
+
+    preHook = ''
+      #export NIX_DEBUG=1
+      export NIX_CFLAGS_LINK="-B${prevStage.tinycc}/lib/tcc"
+    '';
   })
 
 
