@@ -23,13 +23,25 @@ $ENV{"NIXOS_CONFIG"} = "";
 sub showHelp {
     print <<EOF;
 Usage: nixos-container list
-       nixos-container create <container-name> [--nixos-path <path>] [--system-path <path>] [--config-file <path>] [--config <string>] [--ensure-unique-name] [--auto-start] [--bridge <iface>] [--port <port>]
+       nixos-container create <container-name>
+         [--nixos-path <path>]
+         [--system-path <path>]
+         [--config <string>]
+         [--config-file <path>]
+         [--flake <flakeref>]
+         [--ensure-unique-name]
+         [--auto-start]
+         [--bridge <iface>]
+         [--port <port>]
        nixos-container destroy <container-name>
        nixos-container start <container-name>
        nixos-container stop <container-name>
        nixos-container terminate <container-name>
        nixos-container status <container-name>
-       nixos-container update <container-name> [--config <string>] [--config-file <path>]
+       nixos-container update <container-name>
+         [--config <string>]
+         [--config-file <path>]
+         [--flake <flakeref>]
        nixos-container login <container-name>
        nixos-container root-login <container-name>
        nixos-container run <container-name> -- args...
@@ -48,6 +60,7 @@ my $port;
 my $extraConfig;
 my $signal;
 my $configFile;
+my $flake;
 
 GetOptions(
     "help" => sub { showHelp() },
@@ -59,7 +72,8 @@ GetOptions(
     "signal=s" => \$signal,
     "nixos-path=s" => \$nixosPath,
     "config=s" => \$extraConfig,
-    "config-file=s" => \$configFile
+    "config-file=s" => \$configFile,
+    "flake=s" => \$flake
     ) or exit 1;
 
 my $action = $ARGV[0] or die "$0: no action specified\n";
@@ -90,8 +104,6 @@ sub writeNixOSConfig {
 
     my $localExtraConfig = "";
 
-
-
     if ($extraConfig) {
         $localExtraConfig = $extraConfig
     } elsif ($configFile) {
@@ -112,6 +124,14 @@ with lib;
 EOF
 
     write_file($nixosConfigFile, $nixosConfig);
+}
+
+sub buildFlake {
+    system("nix", "build", "-o", "$systemPath.tmp", "--",
+           "$flake:nixosConfigurations.container.config.system.build.toplevel") == 0
+        or die "$0: failed to build container from flake '$flake'\n";
+    $systemPath = readlink("$systemPath.tmp") or die;
+    unlink("$systemPath.tmp");
 }
 
 if ($action eq "create") {
@@ -167,6 +187,7 @@ if ($action eq "create") {
     push @conf, "HOST_BRIDGE=$bridge\n";
     push @conf, "HOST_PORT=$port\n";
     push @conf, "AUTO_START=$autoStart\n";
+    push @conf, "FLAKE=$flake\n" if defined $flake;
     write_file($confFile, \@conf);
 
     close($lock);
@@ -182,6 +203,10 @@ if ($action eq "create") {
     mkpath($profileDir, 0, 0755);
 
     # Build/set the initial configuration.
+    if (defined $flake) {
+        buildFlake();
+    }
+
     if (defined $systemPath) {
         system("nix-env", "-p", "$profileDir/system", "--set", $systemPath) == 0
             or die "$0: failed to set initial container configuration\n";
@@ -316,19 +341,35 @@ elsif ($action eq "status") {
 }
 
 elsif ($action eq "update") {
-    my $nixosConfigFile = "$root/etc/nixos/configuration.nix";
 
-    # FIXME: may want to be more careful about clobbering the existing
-    # configuration.nix.
-    if ((defined $extraConfig && $extraConfig ne "") ||
-         (defined $configFile && $configFile ne "")) {
-        writeNixOSConfig $nixosConfigFile;
+    # Unless overriden on the command line, rebuild the flake recorded
+    # in the container config file. FIXME: read the container config
+    # in a more sensible way.
+    if (!defined $flake && !defined $configFile && !defined $extraConfig) {
+        my $s = read_file($confFile);
+        $s =~ /^FLAKE=(.*)$/m;
+        $flake = $1;
     }
 
-    system("nix-env", "-p", "$profileDir/system",
-           "-I", "nixos-config=$nixosConfigFile", "-f", "<nixpkgs/nixos>",
-           "--set", "-A", "system") == 0
-        or die "$0: failed to build container configuration\n";
+    if (defined $flake) {
+        buildFlake();
+        system("nix-env", "-p", "$profileDir/system", "--set", $systemPath) == 0
+            or die "$0: failed to set container configuration\n";
+    } else {
+        my $nixosConfigFile = "$root/etc/nixos/configuration.nix";
+
+        # FIXME: may want to be more careful about clobbering the existing
+        # configuration.nix.
+        if ((defined $extraConfig && $extraConfig ne "") ||
+            (defined $configFile && $configFile ne "")) {
+            writeNixOSConfig $nixosConfigFile;
+        }
+
+        system("nix-env", "-p", "$profileDir/system",
+               "-I", "nixos-config=$nixosConfigFile", "-f", "<nixpkgs/nixos>",
+               "--set", "-A", "system") == 0
+            or die "$0: failed to build container configuration\n";
+    }
 
     if (isContainerRunning) {
         print STDERR "reloading container...\n";
