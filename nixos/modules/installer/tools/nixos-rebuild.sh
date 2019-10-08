@@ -62,7 +62,7 @@ while [ "$#" -gt 0 ]; do
         j="$1"; shift 1
         extraBuildFlags+=("$i" "$j")
         ;;
-      --show-trace|--keep-failed|-K|--keep-going|-k|--verbose|-v|-vv|-vvv|-vvvv|-vvvvv|--fallback|--repair|--no-build-output|-Q|-j*)
+      --show-trace|--keep-failed|-K|--keep-going|-k|--verbose|-v|-vv|-vvv|-vvvv|-vvvvv|--fallback|--repair|--no-build-output|-Q|-j*|-L)
         extraBuildFlags+=("$i")
         ;;
       --option)
@@ -263,7 +263,7 @@ fi
 
 # Resolve the flake.
 if [[ -n $flake ]]; then
-    flake=$(nix flake info --json -- "$flake" | jq -r .url)
+    flake=$(nix flake info --json "${extraBuildFlags[@]}" -- "$flake" | jq -r .url)
 fi
 
 # Find configuration.nix and open editor instead of building.
@@ -396,7 +396,8 @@ if [ -z "$rollback" ]; then
             pathToConfig="$(nixBuild '<nixpkgs/nixos>' --no-out-link -A system "${extraBuildFlags[@]}")"
         else
             outLink=$tmpDir/result
-            nix build "$flake#$flakeAttr.config.system.build.toplevel" --keep-going "${extraBuildFlags[@]}" --out-link $outLink
+            nix build "$flake#$flakeAttr.config.system.build.toplevel" \
+		--keep-going "${extraBuildFlags[@]}" --out-link $outLink
             pathToConfig="$(readlink -f $outLink)"
         fi
         copyToTarget "$pathToConfig"
